@@ -1,0 +1,123 @@
+These are my notes, a project diary. I highly recommend this practice!
+
+
+[2023-12-02]
+After announcing on FB how easy it is to expand 1571CR RAM to 32K someone asked in comments what's the use for this. Except Maverick I had no answer.
+Over past week I have been browsing 1541 ROM dump at http://unusedino.de/ec64/technical/aay/c1541 trying to figure out where sectors are being read.
+And there is only one place: $F4D1.
+So this afternoon I sat down and started coding: read whole track at once and cache it in $6000-$7FFF.
+For 1541 we can only cache full GCR data (320 bytes+checksum for a sector). There is no time to decode headers either but we can check incoming data and
+compare with the first header that we have read to check if a disk made full revolution (at 300rpm that's 20ms).
+Then we can decode headers in a loop to figure out in which order we've got sectors.
+
+That was all surprisingly easy, by the evening it was working 100% for 1541 or 1571 in 1541 mode.
+But 1571 in native mode uses different procedures.
+
+[2023-12-03]
+And today, thanks to ROM dumps from https://spiro.trikaliotis.net/cbmrom I could copy chunks of 1571 native code that reads and decodes GCR on the fly.
+It makes it actually easier and faster as we keep only decoded data, so there is no overhead.
+Sector headers logic is the same, except there is a different ROM procedure for header GCR to binary decoding, maybe somewhat faster due to more space for
+lookup tables.
+Seems like ideas from here https://www.linusakesson.net/programming/gcr-decoding/index.php (could that be used to speed up 1541 code too? can't be used directly because it's self-modyfing code)
+
+On the way I had some problems with file LOAD/DLOAD in the native mode. It turns out that a zp cell that I chose for temporary storage was actually used by ROM.
+New choices seem to be fine.
+The same code works exactly the same for all 4 variants of 1571 (standalone/DCR, Jiffy/stock).
+I have prepared xxd hexpatch for that and verified that it's the same on all versions I made by hand.
+https://stackoverflow.com/questions/1945075/how-do-i-create-binary-patches
+
+Making them by hand means: add loadaddress to BIN file, run VICE, in monitor load that file, load binary from kickass, enter commands to patch 4 locations, save binary, open HxD to strip that binary from loadaddress and finally save BIN file
+
+The speedup seems to be invisible in VICE - about 6% in 1541 mode (down to 1m from 1m6s).
+I wonder if this effort does anything on the real hardware.
+
+I need to check this again on UII+ first and finally flash 32K ROM to replace on C128DCR#2 (the one which already has RAM exp).
+AR can help in debugging - it should have drive memory monitor:
+
+From: https://rr.pokefinder.org/wiki/Action_Replay_MK6_Manual_Project64.txt
+	7.3 DISK MONITOR FUNCTIONS.
+	@*8  Read and write to device 8.
+	@*89 Read from device 8, write to device 9.
+	@*80 Read from device 8, write to computer Ram.
+	@*08 Read from computer Ram, write to device 8.
+	@* Return to default.
+
+(not relevant here but the next point 7.4 - FREEZE & BREAK POINTS. is something I was not aware of all these years!)
+
+[2023-12-04]
+I wanted to test it with UII+ but RAM expansion is available only for 1541 (manual mentions 1571 but it doesn't work).
+So I flashed 1571DCR ROM, first JiffyDOS, then stock.
+
+Several problems:
+- 128mode/1571 fastload - works
+- 128mode/1541 mode - works (I think)
+- 64mode/1571 slowload - '66,ILLEGAL TRACK OR SECTOR' - for LOAD, directory is fine
+- 64mode/1541 mode - works
+- caching doesn't take writing into account:
+  - file saving won't work - data is stored, BAM updated(?), but dir entry is corrupted (updated in two stages, only one was saved?)
+  - disk validation won't work
+  - check again if 'I' command invalidates cache (NO, IT DOES NOT!)
+- disk format corrupts track 12 (maybe only sector 0,1 but it's enough)
+
+I never checked zp utilization with JiffyDOS under VICE, maybe they overwrite something and that 66 error appears.
+Writing a sector must invalidate track cache
+Validate issues job commands: $B0, $B8, $80,..., $80, $90, $A0
+Save jobs: $80, $90, $A0, ..., $80, $90, $A0, 
+Init jobs: $B0, $B8
+
+1541 jobs:
+     +-------+---------+-------------------------------+
+     |  JOB  |  NAME   |          DESCRIPTION          |
+     +-------+---------+-------------------------------+
+     |  $80  | READ    | Read sector                   |
+     |  $90  | WRITE   | Write sector (includes $A0)   |
+     |  $A0  | VERIFY  | Verify sector                 |
+     |  $B0  | SEEK    | Find sector                   |
+     |  $C0  | BUMP    | Bump, Find track 1            |
+     |  $D0  | JUMP    | Execute program in buffer     |
+     |  $E0  | EXECUTE | Execute program, first switch |
+     |       |         | drive on and find track       |
+     +-------+---------+-------------------------------+
+
+[2023-12-05]
+Asked GPT to write me a patcher script, but when I started adding segments to KickAss source code I realized that segments can overlap and patching is one of their functionality. So there it is. Should have started with it.
+
+Added more patches to intercept job commands and reset cache on any command that changes track. Also patched 'I' command to invalidate cache (same procedure in 71 and 41 mode).
+
+There is a fix for 'V' command on JiffyDOS (not needed on stock) but need to play more with breakpoint on $B278 to check if it's used only for that.
+That 66,ILLEGAL TRACK OR SECTOR was coming from raw GCR data (read from 1541 mode) being interpreted as decoded sector data (in 1571 read sector code).
+
+Also U0>M0 is broken until disk is removed and reentered, 'I' is not enough. Going back to 1571 mode with U0>M1 is fine.
+
+[2023-12-06]
+Patched mode switching code (U0>M[0,1]) and flashed JD 1571D to test on the real hardware. Finally.
+
+[2023-12-09]
+It took two evenings (and one evening for a break) that 1541 mode slowness was due to too frequent cache invalidation. What I thought ran once only at the end of 'V' was actually JD load routine.
+Didn't notice that because my test file was very short (1 sector).
+Cache was invalidated on every sector read and track was read every time a sector read was needed - like worst case of interleave.
+Fixing that required tracking in which mode (decoded '71 or encoded '41) we stored cache and checking that for both sector read patches.
+
+Tested by loading a file saved with different interlave (@G1, @G6, @G10 in JiffyDOS).
+
+Testing revealed:
+- file is loaded with constant speed no matter the interlave: as if optimal interleave was used every time. It's impossible to hit exactly needed sector and be optimal every time a head moves, there is a tiny speed increase, maybe on the order of 5% (could you really notice speed increase from 13s to 11s?)
+- the most benefit in scratch is ~3.5x faster and validate ~4x faster, both sound like fast disk format
+- apart from that there is no benefit in C64/1541 mode - you will use a fastloader, for instance ActionReplay does the same thing as this 1571 with track cache - it loads whole tracks into cartridge RAM and decodes from GCR on the fly
+- you don't lose anything and in some circumstances gain
+
+https://www.c64-wiki.com/wiki/Comparison_of_fast_loaders
+
+C128DCR+int. 1571		patched JD U0>M0	patched JD U0>M1
+Format		0.98		3.2			(forgot to write down)
+PRG Save	1.12		2.66			1
+PRG Load	0.99		13.66			1.12
+SEQ Save	1.13		2.25			1.07
+SEQ Load	0.98		7.38			1.15
+REL create	1.21		1.18			1.36
+Validate	.49		4.13			4.2
+Scratch		.50		3.71			3.24
+Data Transfer	1.09		3.93			(forgot to write down)
+
+[2023-12-13]
+Setup repository on GitHub and pushed the code with its history (shame on me - copying files instead of proper version control from the very beginning).
