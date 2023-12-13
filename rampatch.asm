@@ -39,6 +39,7 @@ r pc=0300
 .const LF50A = $F50A // wait for header and then for sync (F556), patched instruction at $F4D1
 .const LF4D4 = $F4D4 // next instruction after patch at $F4D1
 // 1571 ROM locations
+.const L952F = $952F // decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
 .const L9600 = $9600 // wait for header and then for sync (9754), patched instruction at $960D
 .const L9610 = $9610 // next instruction after patch at $960D
 .const L970A = $970A // return 'ok' error through $99B5
@@ -230,6 +231,13 @@ ReadGCRSector:
 		jmp ReadHeader	// no, read next one
 
 DecodeData:
+		jsr DecodeHeaders
+		// all was said and done, now read the sector from cache
+		jmp ReadSector
+
+/////////////////////////////////////		
+
+DecodeHeaders:
 		// we don't need to decode GCR sector data right now, but we need those sector numbers
 		// so go through all headers and decode them, put them back
 		ldx #0
@@ -271,9 +279,7 @@ DecodeLoop:
 		cpx counter
 		bne DecodeLoop
 		stx RE_max_sector
-
-		// all was said and done, now read the sector from cache
-		jmp ReadSector
+		rts
 
 /////////////////////////////////////		
 
@@ -541,45 +547,7 @@ CheckLoop:
 
 		// GCR data was decoded on the fly, but we also need those sector numbers
 		// so go through all headers and decode them, put them back
-		ldx #0
-		stx bufrest		// reuse for counter
-		stx hdroffs
-
-DecodeLoop71:
-		ldy hdroffs
-		ldx #0
-!:		lda RE_cached_headers,y
-		sta STAB,x
-		iny
-		inx
-		cpx #hdrsize
-		bne !-
-		jsr LF497		// // decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
-.if (0==1) {
-		// debug
-		ldy hdroffs
-		ldx #0
-!:		lda $16,x
-		sta RE_decoded_headers,y
-		iny
-		inx
-		cpx #5
-		bne !-
-		//
-}
-		// XXX check header checksum here to mark mangled sector headers?
-		ldx bufrest
-		lda $19
-		sta RE_cached_headers,x	// store decoded sector number
-		lda hdroffs		// next header
-		clc
-		adc #hdrsize
-		sta hdroffs
-		inx
-		stx bufrest		// next header
-		cpx counter
-		bne DecodeLoop71
-		stx RE_max_sector
+		jsr DecodeHeaders	// decode cached headers (or try to decode them on the fly on 1571)
 
 		// all was said and done, now read the sector from cache
 		jmp ReadSector71
