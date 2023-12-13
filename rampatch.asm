@@ -543,7 +543,46 @@ CheckLoop:
 
 		// GCR data was decoded on the fly, but we also need those sector numbers
 		// so go through all headers and decode them, put them back
-		jsr DecodeHeaders	// decode cached headers (or try to decode them on the fly on 1571)
+		// this is the same as DecodeHeaders for 1541, but we use L952F, apparently faster GCR decoder
+		ldx #0
+		stx bufrest		// reuse for counter
+		stx hdroffs
+
+DecodeLoop71:
+		ldy hdroffs
+		ldx #0
+!:		lda RE_cached_headers,y
+		sta STAB,x
+		iny
+		inx
+		cpx #hdrsize
+		bne !-
+		jsr L952F		// decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
+.if (0==1) {
+		// debug
+		ldy hdroffs
+		ldx #0
+!:		lda $16,x
+		sta RE_decoded_headers,y
+		iny
+		inx
+		cpx #5
+		bne !-
+		//
+}
+		// XXX check header checksum here to mark mangled sector headers?
+		ldx bufrest
+		lda $19
+		sta RE_cached_headers,x	// store decoded sector number
+		lda hdroffs		// next header data offset
+		clc
+		adc #hdrsize
+		sta hdroffs
+		inx
+		stx bufrest		// next header counter
+		cpx counter
+		bne DecodeLoop71
+		stx RE_max_sector
 
 		// all was said and done, now read the sector from cache
 		jmp ReadSector71
