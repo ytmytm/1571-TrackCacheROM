@@ -17,12 +17,6 @@
 // http://unusedino.de/ec64/technical/aay/c1541
 // https://spiro.trikaliotis.net/cbmrom
 
-// +patch $C649 to jsr  into ResetCache (disk init or change or reset, both modes)
-// +patch $F4D1 to jump into ReadSector (1541 mode)
-// +patch $960D to jump into ReadSector71 (1571 mode, could be faster to replicate code that starts there?)
-// +patch $EAE5 to NOP NOP (disable ROM checksum check, both modes)
-
-// ??? patch http://unusedino.de/ec64/technical/aay/c1541/ro41d00e.htm 'read block header' - command $B0 to read from decoded headers? (how often is that used?)
 // ??? also check headers checksums and mark invalid ones?
 // ??? decode 1541 sector data from GCR on the fly as in https://www.linusakesson.net/programming/gcr-decoding/index.php ?
 
@@ -76,21 +70,43 @@
 /////////////////////////////////////
 
 //#define ROM1571
-#define ROMJIFFY1571
+//#define ROM1571CR
+//#define ROMJIFFY1571
+//#define ROMJIFFY1571CR
+
+#if !ROM1571 && !ROM1571CR && !ROMJIFFY1571 && !ROMJIFFY1571CR
+.error "You have to choose ROM to patch"
+#endif
 
 #if ROM1571
 .print "Assembling stock 1571 ROM 310654-05"
-.segmentdef Combined  [outBin="1571-rom.310654-05-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,MainPatch", allowOverlap]
+.segmentdef Combined  [outBin="1571-rom.310654-05-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/1571-rom.310654-05.bin")
 	.fill data.getSize(), data.get(i)
 #endif
 
+#if ROM1571CR
+.print "Assembling stock 1571CR ROM 318047-01"
+.segmentdef Combined  [outBin="1571cr-rom.318047-01-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
+.segment Base [start = $8000, max=$ffff]
+	.var data = LoadBinary("rom/1571cr-rom.318047-01.bin")
+	.fill data.getSize(), data.get(i)
+#endif
+
 #if ROMJIFFY1571
 .print "Assembling standalone JiffyDOS 1571 ROM 310654-05"
-.segmentdef Combined  [outBin="JiffyDOS_1571_repl310654-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
+.segmentdef Combined  [outBin="JiffyDOS_1571_repl310654-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/JiffyDOS_1571_repl310654.bin")
+	.fill data.getSize(), data.get(i)
+#endif
+
+#if ROMJIFFY1571CR
+.print "Assembling standalone JiffyDOS 1571CR ROM"
+.segmentdef Combined  [outBin="JiffyDOS_1571D-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
+.segment Base [start = $8000, max=$ffff]
+	.var data = LoadBinary("rom/JiffyDOS_1571D.bin")
 	.fill data.getSize(), data.get(i)
 #endif
 
@@ -125,8 +141,12 @@
 		.pc = $D005 "Patch 'I' command"
 		jsr InvalidateCacheForJob
 
-#if ROMJIFFY1571
-.segment Patch8 []
+.segment Patch8[]
+		.pc = $9027 "Patch 'U0>M{01}' execution"
+		jsr InvalidateCacheForModeChange
+
+#if ROMJIFFY1571 || ROMJIFFY1571CR
+.segment Patch9 []
 		.pc = $B278 "Patch 'V' execution for JiffyDOS" // same on DCR
 		jsr InvalidateCacheForJDValidate
 #endif
@@ -140,13 +160,21 @@
 
 /////////////////////////////////////
 
-#if ROMJIFFY1571
+#if ROMJIFFY1571 || ROMJIFFY1571CR
 InvalidateCacheForJDValidate: { // patch to make 'V' work, otherwise the very last read after 'V' reads raw cached GCR data read by 1541 code but copies it into $0600 buffer in 1571 code
 		jsr ResetOnlyCache
 		lda $0006,y				// patched instruction
 		rts
 }
 #endif
+
+/////////////////////////////////////
+
+InvalidateCacheForModeChange: {	// patch for U0>M0 switch that would keep returning read error if called when track 18 is active and currently cached
+		jsr ResetOnlyCache
+		lda $0204				// patched instruction - take digit of the mode parameter: '0' or '1'
+		rts
+}
 
 /////////////////////////////////////
 
