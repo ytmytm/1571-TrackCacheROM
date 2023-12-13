@@ -59,7 +59,7 @@ r pc=0300
 
 .const RAMEXP_REST = RAMEXP+(maxsector*$0100)	// this is where remainder GCR data starts, make sure that it doesn't overlap RAMBUF (with sector headers)
 
-		.pc = $0300 "Patch F4D1"
+		.pc = $AC00 "Patch F4D1"
 
 ReadSector:
 // patch $F4D1 to jump in here, required sector number is on (HDRPNT)+1, required track in (HDRPNT), data goes into buffer at (BUFPNT)
