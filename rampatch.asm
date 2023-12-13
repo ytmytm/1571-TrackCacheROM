@@ -63,6 +63,8 @@
 .const L9754 = $9754 // wait for sync, set Y to 0
 .const L99B5 = $99B5 // return with error code in A
 
+// note: if these zero-page location would cause compatibility issues, they can be moved to RAMBUF page, just making code a bit larger
+//       the only exceptions are pointers bufpage/bufrest but these *may* be moved to workarea at BTAB ($52)
 // DOS unused zp
 .const bufpage = $14					// (2) 1541/71 pointer to page GCR data, increase by $0100
 .const bufrest = $2c					// (2) 1541 pointer to remainder GCR data, increase by bufrestsize; written to by GCR decoding routine at F6D0 but on 1541 that's after bufpage/bufrest was already used, doesn't appear in patched 1571 at all
