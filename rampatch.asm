@@ -1,26 +1,30 @@
 
+// 1571 ROM patch for drives with RAM expanded into $6000-$7FFF
+// by Maciej 'YTM/Elysium' Witkowiak <ytm@elysium.pl>, 2023-12-03 V1.0
+
+// INFO
+// - read whole track at once and cache
+// - decode headers to get the order of sectors
+// - 1541: keep GCR data, decode sectors from cache only when requested
+// - 1571: decode GCR data on the fly, return actual data
+// - needs only one disk revolution (20ms with 300rpm) to read whole track
+// - sector GCR decoding errors are reported normally
+// - header GCR decoding errors are not reported - but if sector is not found we fall back on ROM routine which should report it during next disk revolution
+// - same patch for all four variations: stock ROM / JiffyDOS, standalone 1571 / 1571CR
+
+// Excellent resources:
 // http://www.unusedino.de/ec64/technical/formats/g64.html - 10 header GCR bytes? but DOS reads only 8 http://unusedino.de/ec64/technical/aay/c1541/ro41f3b1.htm
-// http://unusedino.de/ec64/technical/aay/c1541/ro41f4d1.htm
+// http://unusedino.de/ec64/technical/aay/c1541
+// https://spiro.trikaliotis.net/cbmrom
 
-/*
-l "c:/Users/Maciejdev/Documents/Projects-shared/15x1-ramexp/rampatch.prg" 0
-b f4d1
-f 6000 8000 0
-r pc=0300
-*/
+// +patch $C649 to jsr  into ResetCache (disk init or change or reset, both modes)
+// +patch $F4D1 to jump into ReadSector (1541 mode)
+// +patch $960D to jump into ReadSector71 (1571 mode, could be faster to replicate code that starts there?)
+// +patch $EAE5 to NOP NOP (disable ROM checksum check, both modes)
 
-// 6% faster on plain load in C64 mode (emulated)
-// +patch $C649 to jsr  into ResetCache (both modes)
-// +patch $F4D1 to jump into ReadSector (only 1541 MODE!)
-// +patch $EAE5 to NOP NOP (disable ROM checksum check)
-// +patch $960D to jump into ReadSector (1571 mode, could be faster to replicate code that starts there?)
-	// CR vs 1571: 97EE JMP $AAAC (CR) vs JMP $AAAD (stock) (poza tym, co mnie interesuje)
-	// CR vs jiffy: 97E9 JSR $97F9 (CR) vs JMP $B393 (jiffy) (j/w) (dekodowanie GCR w buforze?)
-	// 1571 vs jiffy: j/w w CR vs jiffy
-
-// ??? also patch http://unusedino.de/ec64/technical/aay/c1541/ro41d00e.htm 'read block header' - command $B0 to read from decoded headers?
-// ??? check headers checksums and mark invalid ones?
-// ???
+// ??? patch http://unusedino.de/ec64/technical/aay/c1541/ro41d00e.htm 'read block header' - command $B0 to read from decoded headers? (how often is that used?)
+// ??? also check headers checksums and mark invalid ones?
+// ??? decode 1541 sector data from GCR on the fly as in https://www.linusakesson.net/programming/gcr-decoding/index.php ?
 
 .const HEADER = $16
 .const HDRPNT = $32
@@ -44,14 +48,14 @@ r pc=0300
 .const L9610 = $9610 // next instruction after patch at $960D
 .const L970A = $970A // return 'ok' error through $99B5
 .const L9754 = $9754 // wait for sync, set Y to 0
-.const L99B5 = $99B5 // return error in A
+.const L99B5 = $99B5 // return with error code in A
 
 // DOS unused zp
 .const bufpage = $14					// (2) 1541/71 pointer to page GCR data, increase by $0100
 .const bufrest = $2c					// (2) 1541 pointer to remainder GCR data, increase by bufrestsize; written to by GCR decoding routine at F6D0 but on 1541 that's after bufpage/bufrest was already used, doesn't appear in patched 1571 at all
 .const hdroffs = $1b					// (1) 1541/71 offset to header GCR data at RE_cached_headers during data read and header decoding
-.const counter = $1d					// (1) 1541/71 counter of read sectors, saved in RE_max_sector ($4B DOS attempt counter can be used for this); written to by powerup routine at $EBBA, but that's ok
-.const hdroffsold = $46					// (1) 1541/71 temp storage needed to compare current header with 1st read header; written to after load in $917D / $918D (after jump to L970A)
+.const counter = $1d					// (1) 1541/71 counter of read sectors, saved in RE_max_sector (alternatively use $4B DOS attempt counter for header find); written to by powerup routine at $EBBA (write protect drive 1), but that's ok
+.const hdroffsold = $46					// (1) 1541/71 temp storage needed to compare current header with 1st read header; written to and decremented, but only after load in $917D / $918D (after jump to L970A)
 
 // sizes
 .const hdrsize = 8						// header size in GCR (8 GCR bytes become 5 header bytes)
@@ -70,16 +74,16 @@ r pc=0300
 
 /////////////////////////////////////		
 
-		// $B700-$BEFF available both on stock and jiffydos
-		.pc = $B700 "Patch F4D1"
+		// $B700-$BEFF area available both on stock and jiffydos
+		.pc = $B700 "Patch"
 
-		jmp ReadSector			// patch F4D1 to JMP $AC00
-		jmp ReadSector71		// patch 960D to JMP $AC06
-//		jmp ResetCache			// patch C649 to JSR $AC03, this has A=$FF	// XXX reverse the two so that we fall back
+		jmp ReadSector			// patch F4D1 to JMP $B700
+		jmp ReadSector71		// patch 960D to JMP $B703
+//		jmp ResetCache			// patch C649 to JSR $B706 // fall through and save 3 bytes
 
 /////////////////////////////////////		
 
-ResetCache:
+ResetCache:						// enters with A=$FF
 		sta $0298				// patched code, set error flag
 ResetOnlyCache:
 		sta RE_cached_track		// set invalid values
@@ -103,7 +107,7 @@ ReadCache:
 		// setup pointers
 		lda #>RAMEXP			// pages - first 256 bytes
 		sta bufpage+1
-		lda #>RAMEXP_REST	// remainders - following bytes until end of sector ($46 but we add $80 each time)
+		lda #>RAMEXP_REST		// remainders - following bytes until end of sector ($46 bytes)
 		sta bufrest+1
 		lda #0
 		sta bufpage
@@ -124,9 +128,9 @@ ReadCache:
 !:		inx
 		cpx RE_max_sector
 		bne !loop-
-		// not found? fall back on ROM
-		jsr LF50A	// replaced instruction
-		jmp LF4D4	// next instruction
+		// not found? fall back on ROM and try to read it again
+		jsr LF50A				// replaced instruction
+		jmp LF4D4				// next instruction
 
 !found:	// copy GCR data and fall back into ROM		
 		ldy #0
@@ -142,7 +146,7 @@ ReadCache:
 		inx
 		bne !-
 		
-		jmp LF4ED	// continue in ROM
+		jmp LF4ED	// we have data as if it came from the disk, continue in ROM: decode and return 'ok' (or sector checksum read error)
 
 /////////////////////////////////////		
 
@@ -151,7 +155,7 @@ ReadTrack:
 
 		lda #>RAMEXP			// pages - first 256 bytes
 		sta bufpage+1
-		lda #>RAMEXP_REST	// remainders - following bytes until end of sector ($46 but we add $80 each time)
+		lda #>RAMEXP_REST		// remainders - following bytes until end of sector ($46 but we add $80 each time)
 		sta bufrest+1
 		lda #0
 		sta bufpage
@@ -159,10 +163,7 @@ ReadTrack:
 		sta hdroffs				// 8-byte counter for sector headers at RAMBUF
 		sta counter				// data block counter
 
-		// (BUFPNT:$0100)+(HEADER:$0046) - GCR sector data, BUFPNT+$100, HEADER+$80
-		// HEADER+2 - RAMBUF offset to GCR header data, HEADER+2 + $08
-		// end loop when read header is the same as 1st read counter (full revolution) or block counter is 23
-
+		// end loop when header we just read is the same as 1st read counter (full disk revolution) or block counter is 23
 ReadHeader:
 		jsr	LF556			// ; wait for SYNC, Y=0
 		ldx hdroffs
@@ -171,7 +172,7 @@ ReadHeader:
 !:		bvc !-
 		clv
 		lda $1c01
-		cmp #$52			// is that header?
+		cmp #$52			// is that a header?
 		bne ReadHeader		// no, wait until next SYNC
 		sta RE_cached_headers,x
 		inx
@@ -185,7 +186,7 @@ ReadHeader:
 		cpy #hdrsize		// whole header?
 		bne !-
 		stx hdroffs			// new header offset
-		// do we have that sector already? (on VICE there is enough time to check it even on fastest speedzone (track 35))
+		// do we have that sector already? (tested on VICE that there is enough time to check it before sector sync even on the fastest speedzone (track 35))
 		ldx hdroffsold
 		beq ReadGCRSector	// it's first sector, nothing to compare with
 		ldy #0
@@ -196,17 +197,17 @@ ReadHeader:
 		iny
 		cpy #3				// last few bytes are identical too
 		bne !-
-		jmp DecodeData		// yes, no need to read more
+		jmp DecodeHeaders	// yes, no need to read more
 
 ReadGCRSector:
-		jsr LF556			// wait for SYNC, Y=0
+		jsr LF556			// wait for SYNC, will set Y=0
 !:		bvc !-
 		clv
 		lda $1c01
 		sta (bufpage),y
 		iny
 		bne !-
-		ldx #$BA		// ; from $1BA to $1FF
+		ldx #$BA			// write rest: in ROM from $1BA to $1FF, here we just count it up
 		ldy #0
 !:		bvc !-
 		clv
@@ -226,22 +227,15 @@ ReadGCRSector:
 		bcc !+
 		inc bufrest+1
 !:		lda counter
-		cmp #maxsector	// all sectors already?
-		beq DecodeData  // should never run
-		jmp ReadHeader	// no, read next one
-
-DecodeData:
-		jsr DecodeHeaders
-		// all was said and done, now read the sector from cache
-		jmp ReadSector
-
-/////////////////////////////////////		
+		cmp #maxsector		// do we have all sectors already? (should be never equal)
+		beq DecodeHeaders	// this jump should be never taken
+		jmp ReadHeader		// not all sectors, read the next one
 
 DecodeHeaders:
 		// we don't need to decode GCR sector data right now, but we need those sector numbers
 		// so go through all headers and decode them, put them back
 		ldx #0
-		stx bufrest		// reuse for counter
+		stx bufrest			// reuse for counter
 		stx hdroffs
 
 DecodeLoop:
@@ -253,7 +247,7 @@ DecodeLoop:
 		inx
 		cpx #hdrsize
 		bne !-
-		jsr LF497		// // decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
+		jsr LF497			// decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
 .if (0==1) {
 		// debug
 		ldy hdroffs
@@ -270,16 +264,18 @@ DecodeLoop:
 		ldx bufrest
 		lda $19
 		sta RE_cached_headers,x	// store decoded sector number
-		lda hdroffs		// next header
+		lda hdroffs			// next header data offset
 		clc
 		adc #hdrsize
 		sta hdroffs
 		inx
-		stx bufrest		// next header
+		stx bufrest			// next header counter
 		cpx counter
 		bne DecodeLoop
 		stx RE_max_sector
-		rts
+
+		// all was said and done, now read the sector from cache
+		jmp ReadSector
 
 /////////////////////////////////////		
 
@@ -292,7 +288,7 @@ ReadSector71:
 		jmp ReadTrack71			// no - read the track in native 71 mode
 
 ReadCache71:
-		iny						// yes, track is cached, just put GCR data back and jump into ROM
+		iny						// yes, track is cached, just put data back and jump into ROM
 		lda (HDRPNT),y			// needed sector number
 		sta hdroffs				// keep it here
 		// setup pointers
@@ -310,9 +306,9 @@ ReadCache71:
 		inx
 		cpx RE_max_sector
 		bne !loop-
-		// not found? fall back on ROM
-		jsr L9600	// replaced instruction
-		jmp L9610	// next instruction
+		// not found? fall back on ROM and try to read it again
+		jsr L9600				// replaced instruction
+		jmp L9610				// next instruction
 
 !found:	// copy data and fall back into ROM		
 		ldy #0
@@ -321,7 +317,7 @@ ReadCache71:
 		iny
 		bne !-
 
-		jmp L970A	// continue in ROM, 'ok' error
+		jmp L970A				// we have data as if it came from the disk, continue in ROM: decode and return 'ok'
 
 ReadTrack71:
 		sta RE_cached_track		// this will be our new track for caching
@@ -333,7 +329,7 @@ ReadTrack71:
 		sta hdroffs				// 8-byte counter for sector headers at RAMBUF
 		sta counter				// data block counter
 
-
+		// end loop when header we just read is the same as 1st read counter (full disk revolution) or block counter is 23
 ReadHeader71:
 		jsr	L9754			// ; wait for SYNC, Y=0
 		ldx hdroffs
@@ -344,7 +340,7 @@ ReadHeader71:
 		bmi !-
 		clv
 		cmp $1c01			// is that header?
-		bne ReadHeader71		// no, wait until next SYNC
+		bne ReadHeader71	// no, wait until next SYNC
 		sta RE_cached_headers,x
 		inx
 		iny					// yes, read remaining 8 bytes (or 10?)
@@ -357,7 +353,7 @@ ReadHeader71:
 		cpy #hdrsize		// whole header?
 		bne !-
 		stx hdroffs			// new header offset
-		// do we have that sector already? (on VICE there is enough time to check it even on fastest speedzone (track 35))
+		// do we have that sector already? (tested on VICE that there is enough time to check it before sector sync even on the fastest speedzone (track 35))
 		ldx hdroffsold
 		beq ReadGCRSector71	// it's first sector, nothing to compare with
 		ldy #0
@@ -378,9 +374,9 @@ ReadHeader71:
 .const LA30D = $A30D
 
 ReadGCRSector71:
-		jsr L9754			// wait for SYNC, Y=0
-		// copy from 9610
-		// replaced sta (BUFPNT),y by sta (bufpage),y
+		jsr L9754			// wait for SYNC, will set Y=0
+		// copied from 9610 onwards: read and decode sector on the fly
+		// but replaced sta (BUFPNT),y by sta (bufpage),y
 !:		bit $180f
 		bmi !-
 		lda $1c01
@@ -423,7 +419,7 @@ L963B:
 		ora	BTAB
 		sta	(bufpage),y
 		iny
-		beq	L96D7					// exit loop, whole block read
+		beq	L96D7					// exit loop, whole block was read
 L9667:
 		lda	BTAB + 2
 		tax
@@ -500,38 +496,38 @@ L96D7:						// end of loop reached, whole block was read
 		sta	BTAB + 1
 		pla
 		cmp	DBID
-		bne	L9707		// error 4
+		bne	L9707			// issue error 4
 		ldx counter
 		lda BTAB + 1
-		sta RE_cached_checksums,x	// save expected checksum for later, can't do that now
+		sta RE_cached_checksums,x	// save expected checksum for later, we can't checksum that sector now
 		jmp ReadGCRSector71OK
 CheckSumErr:
-		ldx #$05		// error 5
+		ldx #$05			// issue error 5
 		.byte $2c
-L9707:	ldx #$04		// error 4
+L9707:	ldx #$04			// issue error 4
 		lda #$ff
-		jsr ResetOnlyCache	// nothing is cached
+		jsr ResetOnlyCache	// any error invalidates cache, nothing is cached
 		txa
-		jmp	L99B5		// return with error
+		jmp	L99B5			// return with error
 
 ReadGCRSector71OK:
-		// no checksum error, continue
+		// there were no checksum errors yet, continue reading sectors
 		// adjust pointers
 		inc bufpage+1
 		inc counter
 		lda counter
-		cmp #maxsector		// all sectors already?
-		beq DecodeData71  	// should never run
-		jmp ReadHeader71	// no, read next one
+		cmp #maxsector		// do we have all sectors already? (should be never equal)
+		beq DecodeData71  	// this jump should be never taken
+		jmp ReadHeader71	// not all sectors, read the next one
 
-		// doesn't have to be special for 71, isn't it?
-		// almost the same as DecodeData but we need to check sector checksums and fall back into different place - there is enough space to duplicate that code
+		// almost the same as DecodeData but we need to validate sector checksums and return back into ReadSector71
+		// we use different header decoding ROM routine, probably faster(?)
 DecodeData71:
 		// check checksums of all sectors
 		lda #>RAMEXP			// can reuse bufpage here
 		sta bufpage+1
 		ldx #0
-		// F5E9
+		// this came from F5E9
 CheckLoop:
 		lda #0
 		tay
