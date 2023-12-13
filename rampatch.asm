@@ -1,6 +1,5 @@
 
 // http://www.unusedino.de/ec64/technical/formats/g64.html - 10 header GCR bytes? but DOS reads only 8 http://unusedino.de/ec64/technical/aay/c1541/ro41f3b1.htm
-
 // http://unusedino.de/ec64/technical/aay/c1541/ro41f4d1.htm
 
 /*
@@ -10,18 +9,15 @@ f 6000 8000 0
 r pc=0300
 */
 
-// need $0114 bytes - enough left in both stock and jiffydos
-
-// $AE00
-
+// 6% faster on plain load in C64 mode
+// patch $C649 to jsr  into ResetCache (both modes)
 // patch $F4D1 to jump into ReadSector (only 1541 MODE!)
-// !! another patch for 1571mode ReadSector - near $9600  $960d==$f4d1
-// what to patch for disk change? (or 'I')?' http://unusedino.de/ec64/technical/aay/c1541/ro41f99c.htm ($1C==1 gdy disk change)
-//		http://unusedino.de/ec64/technical/aay/c1541/ro41c63d.htm test and initialize drive (tu jest czyszczony przez LSR)
-// ??? The 1541 and 1571 use the write protect light sensor to know whether the disk has been changed
-// what to patch for reset? http://unusedino.de/ec64/technical/aay/c1541/ro41eaa0.htm
+// patch $EAE5 to NOP NOP (disable ROM checksum check)
+// patch $960D to jump into ReadSector (1571 mode, could be faster to replicate code that starts there?)
+	// XXX works for dir, not burst file load -> $0100 corruption?
 
-// ??? patch http://unusedino.de/ec64/technical/aay/c1541/ro41d00e.htm 'read block header' - komenda $B0
+// ??? also patch http://unusedino.de/ec64/technical/aay/c1541/ro41d00e.htm 'read block header' - command $B0 to read from decoded headers?
+// ??? check headers checksums and mark invalid ones?
 
 .const HEADER = $16
 .const HDRPNT = $32
