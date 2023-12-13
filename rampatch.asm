@@ -2,6 +2,24 @@
 // 1571 ROM patch for drives with RAM expanded into $6000-$7FFF
 // by Maciej 'YTM/Elysium' Witkowiak <ytm@elysium.pl>, 2023-12-03 V1.0
 
+// Configuration
+// uncomment one of the definitions below or pass them to KickAss as a command line option, e.g. -define ROM1571
+
+// stock standalone 1571 ROM 310654-05
+//#define ROM1571
+
+// stock internal 1571CR ROM 318047-01
+//#define ROM1571CR
+
+// JiffyDOS for standalone 1571
+//#define ROMJIFFY1571
+
+// JiffyDOS for internal 1571CR
+//#define ROMJIFFY1571CR
+
+// JiffyDOS for internal 1571CR, patched for PAL systems with http://dtvforge.i24.cc/j1571dcr/
+//#define ROMJIFFY1571CRPAL
+
 // INFO
 // - read whole track at once and cache
 // - decode headers to get the order of sectors
@@ -69,12 +87,6 @@
 .const RE_cached_checksums = RAMBUF-$0100 // 1571 only
 
 /////////////////////////////////////
-
-//#define ROM1571
-//#define ROM1571CR
-//#define ROMJIFFY1571
-//#define ROMJIFFY1571CR
-//#define ROMJIFFY1571CRPAL
 
 #if !ROM1571 && !ROM1571CR && !ROMJIFFY1571 && !ROMJIFFY1571CR && !ROMJIFFY1571CRPAL
 .error "You have to choose ROM to patch"
