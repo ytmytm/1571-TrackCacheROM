@@ -29,13 +29,13 @@ r pc=0300
 
 .const BUFPNT = $30
 
+// 1541 ROM locations (1571 in 1541 mode)
 .const LF969 = $F969 // error continuation
-
 .const LF556 = $F556 // wait for sync, set Y to 0
-
 .const LF497 = $F497 // decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
-
 .const LF4ED = $F4ED // part of read sector procedure right after GCR sector data is read - decode GCR from BUFPNT+$01BA:FF into BUFPNT
+.const LF50A = $F50A // wait for header and then for sync, patched instruction at $F4D1
+.const LF4D4 = $F4D4 // next instruction after patch at $F4D1
 
 .const RAMEXP = $6000 // 8K of expanded RAM
 .const RAMBUF = $7E00 // last page for various stuff
@@ -98,8 +98,8 @@ ReadCache:
 		cpx RE_max_sector
 		bne !loop-
 		// not found? fall back on ROM
-		jsr $F50A
-		jmp $F4D4
+		jsr LF50A
+		jmp LF4D4
 
 !found:	// copy GCR data and fall back into ROM		
 		ldy #0
