@@ -75,13 +75,22 @@
 
 /////////////////////////////////////
 
-#define ROM1571
+//#define ROM1571
+#define ROMJIFFY1571
 
 #if ROM1571
 .print "Assembling stock 1571 ROM 310654-05"
 .segmentdef Combined  [outBin="1571-rom.310654-05-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/1571-rom.310654-05.bin")
+	.fill data.getSize(), data.get(i)
+#endif
+
+#if ROMJIFFY1571
+.print "Assembling standalone JiffyDOS 1571 ROM 310654-05"
+.segmentdef Combined  [outBin="JiffyDOS_1571_repl310654-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
+.segment Base [start = $8000, max=$ffff]
+	.var data = LoadBinary("rom/JiffyDOS_1571_repl310654.bin")
 	.fill data.getSize(), data.get(i)
 #endif
 
@@ -116,12 +125,28 @@
 		.pc = $D005 "Patch 'I' command"
 		jsr InvalidateCacheForJob
 
+#if ROMJIFFY1571
+.segment Patch8 []
+		.pc = $B278 "Patch 'V' execution for JiffyDOS" // same on DCR
+		jsr InvalidateCacheForJDValidate
+#endif
+
 /////////////////////////////////////
 
 .segment MainPatch [min=$b700,max=$beff]
 
 		// $B700-$BEFF area available both on stock and jiffydos
 		.pc = $B700 "Patch"
+
+/////////////////////////////////////
+
+#if ROMJIFFY1571
+InvalidateCacheForJDValidate: { // patch to make 'V' work, otherwise the very last read after 'V' reads raw cached GCR data read by 1541 code but copies it into $0600 buffer in 1571 code
+		jsr ResetOnlyCache
+		lda $0006,y				// patched instruction
+		rts
+}
+#endif
 
 /////////////////////////////////////
 
