@@ -63,6 +63,7 @@
 .const RAMEXP_REST = RAMEXP+(maxsector*$0100)	// this is where remainder GCR data starts, make sure that it doesn't overlap RAMBUF (with sector headers)
 .const RE_cached_track = RAMBUF+$ff
 .const RE_max_sector = RAMBUF+$fe
+.const RE_lastmode = RAMBUF+$fd
 .const RE_decoded_headers = RAMBUF // can be the same as RE_cached_headers, separated for debug only
 .const RE_cached_headers = RAMBUF+$0100
 .const RE_cached_checksums = RAMBUF-$0100 // 1571 only
@@ -73,7 +74,7 @@
 //#define ROM1571CR
 //#define ROMJIFFY1571
 //#define ROMJIFFY1571CR
-#define ROMJIFFY1571CRPAL
+//#define ROMJIFFY1571CRPAL
 
 #if !ROM1571 && !ROM1571CR && !ROMJIFFY1571 && !ROMJIFFY1571CR && !ROMJIFFY1571CRPAL
 .error "You have to choose ROM to patch"
@@ -97,7 +98,7 @@
 
 #if ROMJIFFY1571
 .print "Assembling JiffyDOS for standalone 1571 ROM 310654-05"
-.segmentdef Combined  [outBin="JiffyDOS_1571_repl310654-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
+.segmentdef Combined  [outBin="JiffyDOS_1571_repl310654-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/JiffyDOS_1571_repl310654.bin")
 	.fill data.getSize(), data.get(i)
@@ -105,7 +106,7 @@
 
 #if ROMJIFFY1571CR
 .print "Assembling C128DCR JiffyDOS 1571CR ROM"
-.segmentdef Combined  [outBin="JiffyDOS_1571D-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
+.segmentdef Combined  [outBin="JiffyDOS_1571D-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/JiffyDOS_1571D.bin")
 	.fill data.getSize(), data.get(i)
@@ -113,7 +114,7 @@
 
 #if ROMJIFFY1571CRPAL
 .print "Assembling C128DCR JiffyDOS 1571CR patched for PAL http://dtvforge.i24.cc/j1571dcr/"
-.segmentdef Combined  [outBin="jd71dcr-pal-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
+.segmentdef Combined  [outBin="jd71dcr-pal-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/jd71dcr-pal.bin")
 	.fill data.getSize(), data.get(i)
@@ -154,28 +155,12 @@
 		.pc = $9027 "Patch 'U0>M{01}' execution"
 		jsr InvalidateCacheForModeChange
 
-#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
-.segment Patch9 []
-		.pc = $B278 "Patch 'V' execution for JiffyDOS" // same on DCR
-		jsr InvalidateCacheForJDValidate
-#endif
-
 /////////////////////////////////////
 
 .segment MainPatch [min=$b700,max=$beff]
 
 		// $B700-$BEFF area available both on stock and jiffydos
 		.pc = $B700 "Patch"
-
-/////////////////////////////////////
-
-#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
-InvalidateCacheForJDValidate: { // patch to make 'V' work, otherwise the very last read after 'V' reads raw cached GCR data read by 1541 code but copies it into $0600 buffer in 1571 code
-		jsr ResetOnlyCache
-		lda $0006,y				// patched instruction
-		rts
-}
-#endif
 
 /////////////////////////////////////
 
@@ -236,6 +221,13 @@ ReadSector:
 		jmp ReadTrack			// no - read the track
 
 ReadCache:
+#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
+// JD is making it harder, calls 1571 mode sector read (for fast mode) even when track was cached in 1541 mode already)
+		bit RE_lastmode			// was cached data decoded from GCR (on the fly)?
+		bmi !+					// no, decode it first
+		jmp ReadCache71			// data in cache is there already binary, no need for decoding
+!:
+#endif
 		iny						// yes, track is cached, just put GCR data back and jump into ROM
 		lda (HDRPNT),y			// needed sector number
 		sta hdroffs				// keep it here
@@ -408,6 +400,11 @@ DecodeLoop:
 		cpx counter
 		bne DecodeLoop
 		stx RE_max_sector
+#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
+		// cache in 1541 mode - stored as GCR, needs decoding
+		lda #$80
+		sta RE_lastmode
+#endif
 
 		// all was said and done, now read the sector from cache
 		jmp ReadSector
@@ -423,6 +420,13 @@ ReadSector71:
 		jmp ReadTrack71			// no - read the track in native 71 mode
 
 ReadCache71:
+#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
+// JD is making it harder, calls 1571 mode sector read (for fast mode) even when track was cached in 1541 mode already)
+		bit RE_lastmode			// was cached data already decoded from GCR (on the fly)?
+		bpl !+					// yes
+		jmp ReadCache			// no, data in cache is GCR-encoded, needs to be decoded first
+!:
+#endif
 		iny						// yes, track is cached, just put data back and jump into ROM
 		lda (HDRPNT),y			// needed sector number
 		sta hdroffs				// keep it here
@@ -501,7 +505,7 @@ ReadHeader71:
 		bne !-
 		jmp DecodeData71	// yes, no need to read more
 
-// GCR decoding tables
+// GCR decoding tables in 1571 ROM
 .const L9F0D = $9F0D
 .const LA00D = $A00D
 .const LA10D = $A10D
@@ -717,6 +721,10 @@ DecodeLoop71:
 		cpx counter
 		bne DecodeLoop71
 		stx RE_max_sector
-
+#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
+		// cache in 1571 mode - already decoded
+		lda #$00
+		sta RE_lastmode
+#endif
 		// all was said and done, now read the sector from cache
 		jmp ReadSector71
