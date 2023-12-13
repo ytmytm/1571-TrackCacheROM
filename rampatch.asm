@@ -3,6 +3,11 @@
 // by Maciej 'YTM/Elysium' Witkowiak <ytm@elysium.pl>, 2023-12-03 V1.0
 
 // Configuration
+
+// RAM expansion base address, we need 8K ($2000) area, by default $6000-$7FFF
+.const RAMEXP = $6000 // 8K of expanded RAM
+
+// which ROM to patch?
 // uncomment one of the definitions below or pass them to KickAss as a command line option, e.g. -define ROM1571
 
 // stock standalone 1571 ROM 310654-05
@@ -11,13 +16,13 @@
 // stock internal 1571CR ROM 318047-01
 //#define ROM1571CR
 
-// JiffyDOS for standalone 1571
+// JiffyDOS for standalone 1571 (rom/JiffyDOS_1571_repl310654.bin)
 //#define ROMJIFFY1571
 
-// JiffyDOS for internal 1571CR
+// JiffyDOS for internal 1571CR (rom/JiffyDOS_1571D.bin)
 //#define ROMJIFFY1571CR
 
-// JiffyDOS for internal 1571CR, patched for PAL systems with http://dtvforge.i24.cc/j1571dcr/
+// JiffyDOS for internal 1571CR, patched for PAL systems with http://dtvforge.i24.cc/j1571dcr/ (rom/jd71dcr-pal.bin)
 //#define ROMJIFFY1571CRPAL
 
 // INFO
@@ -78,8 +83,7 @@
 .const bufrestsize = $48				// size of GCR data over page size, it's $46 really, but it's rounded up
 
 // actual area used: $6000-7BFF (track 1, 21 sectors)
-.const RAMEXP = $6000 // 8K of expanded RAM
-.const RAMBUF = $7E00 // last page for various stuff
+.const RAMBUF = RAMEXP+$1E00 // last page for various stuff
 .const RAMEXP_REST = RAMEXP+(maxsector*$0100)	// this is where remainder GCR data starts, make sure that it doesn't overlap RAMBUF (with sector headers)
 .const RE_cached_track = RAMBUF+$ff
 .const RE_max_sector = RAMBUF+$fe
