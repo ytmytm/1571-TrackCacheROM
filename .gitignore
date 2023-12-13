@@ -1,0 +1,4 @@
+*.log
+*.sym
+*.vs
+tools/*
