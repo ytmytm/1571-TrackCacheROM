@@ -10,7 +10,7 @@
 // - needs only one disk revolution (20ms with 300rpm) to read whole track
 // - sector GCR decoding errors are reported normally
 // - header GCR decoding errors are not reported - but if sector is not found we fall back on ROM routine which should report it during next disk revolution
-// - same patch for all four variations: stock ROM / JiffyDOS, standalone 1571 / 1571CR
+// - same patch for all four variations: stock ROM / JiffyDOS, standalone 1571 / 1571CR and also JiffyDOS for C128DCR PAL
 
 // Excellent resources:
 // http://www.unusedino.de/ec64/technical/formats/g64.html - 10 header GCR bytes? but DOS reads only 8 http://unusedino.de/ec64/technical/aay/c1541/ro41f3b1.htm
@@ -73,8 +73,9 @@
 //#define ROM1571CR
 //#define ROMJIFFY1571
 //#define ROMJIFFY1571CR
+#define ROMJIFFY1571CRPAL
 
-#if !ROM1571 && !ROM1571CR && !ROMJIFFY1571 && !ROMJIFFY1571CR
+#if !ROM1571 && !ROM1571CR && !ROMJIFFY1571 && !ROMJIFFY1571CR && !ROMJIFFY1571CRPAL
 .error "You have to choose ROM to patch"
 #endif
 
@@ -95,7 +96,7 @@
 #endif
 
 #if ROMJIFFY1571
-.print "Assembling standalone JiffyDOS 1571 ROM 310654-05"
+.print "Assembling JiffyDOS for standalone 1571 ROM 310654-05"
 .segmentdef Combined  [outBin="JiffyDOS_1571_repl310654-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/JiffyDOS_1571_repl310654.bin")
@@ -103,10 +104,18 @@
 #endif
 
 #if ROMJIFFY1571CR
-.print "Assembling standalone JiffyDOS 1571CR ROM"
+.print "Assembling C128DCR JiffyDOS 1571CR ROM"
 .segmentdef Combined  [outBin="JiffyDOS_1571D-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
 .segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/JiffyDOS_1571D.bin")
+	.fill data.getSize(), data.get(i)
+#endif
+
+#if ROMJIFFY1571CRPAL
+.print "Assembling C128DCR JiffyDOS 1571CR patched for PAL http://dtvforge.i24.cc/j1571dcr/"
+.segmentdef Combined  [outBin="jd71dcr-pal-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,Patch8,Patch9,MainPatch", allowOverlap]
+.segment Base [start = $8000, max=$ffff]
+	.var data = LoadBinary("rom/jd71dcr-pal.bin")
 	.fill data.getSize(), data.get(i)
 #endif
 
@@ -145,7 +154,7 @@
 		.pc = $9027 "Patch 'U0>M{01}' execution"
 		jsr InvalidateCacheForModeChange
 
-#if ROMJIFFY1571 || ROMJIFFY1571CR
+#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
 .segment Patch9 []
 		.pc = $B278 "Patch 'V' execution for JiffyDOS" // same on DCR
 		jsr InvalidateCacheForJDValidate
@@ -160,7 +169,7 @@
 
 /////////////////////////////////////
 
-#if ROMJIFFY1571 || ROMJIFFY1571CR
+#if ROMJIFFY1571 || ROMJIFFY1571CR || ROMJIFFY1571CRPAL
 InvalidateCacheForJDValidate: { // patch to make 'V' work, otherwise the very last read after 'V' reads raw cached GCR data read by 1541 code but copies it into $0600 buffer in 1571 code
 		jsr ResetOnlyCache
 		lda $0006,y				// patched instruction
