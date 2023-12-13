@@ -37,6 +37,7 @@
 .const BTAB = $52 // (4)
 
 // 1541 ROM locations (1571 in 1541 mode)
+.const LC1D1 = $C1D1 // find drive number, instruction patched at $D005
 .const LF556 = $F556 // wait for sync, set Y to 0
 .const LF497 = $F497 // decode 8 GCR bytes from $24 into header structure at $16-$1A (track at $18, sector at $19)
 .const LF4ED = $F4ED // part of read sector procedure right after GCR sector data is read - decode GCR from BUFPNT+$01BA:FF into BUFPNT
@@ -72,62 +73,97 @@
 .const RE_cached_headers = RAMBUF+$0100
 .const RE_cached_checksums = RAMBUF-$0100 // 1571 only
 
-/////////////////////////////////////		
+/////////////////////////////////////
 
 #define ROM1571
 
 #if ROM1571
 .print "Assembling stock 1571 ROM 310654-05"
-.segmentdef Combined  [outBin="1571-rom.310654-05-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,MainPatch", allowOverlap]
-.segment Base [start = $8000]
+.segmentdef Combined  [outBin="1571-rom.310654-05-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,Patch5,Patch6,Patch7,MainPatch", allowOverlap]
+.segment Base [start = $8000, max=$ffff]
 	.var data = LoadBinary("rom/1571-rom.310654-05.bin")
 	.fill data.getSize(), data.get(i)
 #endif
 
-/////////////////////////////////////		
+/////////////////////////////////////
 
 .segment Patch1 []
-
 		.pc = $F4D1 "Patch 1541 sector read"
-		jmp $B700 // jmp ReadSector
+		jmp ReadSector
 
 .segment Patch2 []
-
 		.pc = $960D "Patch 1571 sector read"
-		jmp $B703 // jmp ReadSector71
+		jmp ReadSector71
 
 .segment Patch3 []
-
 		.pc = $C649 "Patch disk change"
-		jsr $B706 // jsr ResetCache
+		jsr ResetCache
 
 .segment Patch4 []
-
 		.pc = $EAE5 "Patch ROM checksum"
 		nop
 		nop
 
-/////////////////////////////////////		
+.segment Patch5 []
+		.pc = $F2C0 "Patch 1541 IRQ routine for disk controller"
+		jsr InvalidateCacheForJob
 
-.segment MainPatch []
+.segment Patch6 []
+		.pc = $92CA "Patch 1571 IRQ routine for disk controller"
+		jsr InvalidateCacheForJob
+
+.segment Patch7 []
+		.pc = $D005 "Patch 'I' command"
+		jsr InvalidateCacheForJob
+
+/////////////////////////////////////
+
+.segment MainPatch [min=$b700,max=$beff]
 
 		// $B700-$BEFF area available both on stock and jiffydos
 		.pc = $B700 "Patch"
 
-		jmp ReadSector			// patch F4D1 to JMP $B700
-		jmp ReadSector71		// patch 960D to JMP $B703
-//		jmp ResetCache			// patch C649 to JSR $B706 // fall through and save 3 bytes
+/////////////////////////////////////
 
-/////////////////////////////////////		
+InvalidateCacheForJob: {
+		tya						// enters with Y as job number (5,4,3,2,1,0), we can change A,X but not Y
+		tax
+		lda $00,x				// job?
+		bpl return				// no job
+		cmp #$D0				// execute code?
+		beq return				// yes, exec doesn't seek to track
+		cmp #$90				// write sector?
+		beq resetcache			// yes, always invalidate cache
+		tya						// get track
+		asl						// *2
+		tax
+		lda $06,x				// check track parameter for job
+		cmp RE_cached_track		// is it cached already?
+		beq return				// yes, there will be no track change
+resetcache:
+		jsr ResetOnlyCache		// invalidate cache
+return:
+		lda $00,y				// instruction from patched $F2C0 and $92CA, must change CPU flags
+		rts
+}
+
+/////////////////////////////////////
+
+InitializeAndResetCache:
+		jsr ResetOnlyCache
+		jmp LC1D1				// instruction from patched $D005
+
+/////////////////////////////////////
 
 ResetCache:						// enters with A=$FF
-		sta $0298				// patched code, set error flag
+		sta $0298				// instruction from patched $C649, set error flag
 ResetOnlyCache:
+		lda #$ff
 		sta RE_cached_track		// set invalid values
 		sta RE_max_sector
 		rts
 
-/////////////////////////////////////		
+/////////////////////////////////////
 
 ReadSector:
 // patch $F4D1 to jump in here, required sector number is on (HDRPNT)+1, required track in (HDRPNT), data goes into buffer at (BUFPNT)
@@ -185,7 +221,7 @@ ReadCache:
 		
 		jmp LF4ED	// we have data as if it came from the disk, continue in ROM: decode and return 'ok' (or sector checksum read error)
 
-/////////////////////////////////////		
+/////////////////////////////////////
 
 ReadTrack:
 		sta RE_cached_track		// this will be our new track for caching
@@ -314,7 +350,7 @@ DecodeLoop:
 		// all was said and done, now read the sector from cache
 		jmp ReadSector
 
-/////////////////////////////////////		
+/////////////////////////////////////
 
 ReadSector71:
 // patch $960D to jump in here, required sector number is on (HDRPNT)+1, required track in (HDRPNT), data goes into buffer at (BUFPNT)
@@ -542,7 +578,6 @@ CheckSumErr:
 		ldx #$05			// issue error 5
 		.byte $2c
 L9707:	ldx #$04			// issue error 4
-		lda #$ff
 		jsr ResetOnlyCache	// any error invalidates cache, nothing is cached
 		txa
 		jmp	L99B5			// return with error
