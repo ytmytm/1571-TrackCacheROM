@@ -20,6 +20,7 @@ r pc=0300
 // ??? check headers checksums and mark invalid ones?
 
 .const HEADER = $16
+.const WPSW = $1c // 1 for disk change
 .const HDRPNT = $32
 .const STAB = $24
 
@@ -57,13 +58,22 @@ r pc=0300
 
 		.pc = $AC00 "Patch F4D1"
 
+		jmp ReadSector			// patch F4D1 to JMP $AC00
+		jmp ResetCache			// patch C649 to JSR $AC03, this has A=$FF
+		//jmp ReadSector71		// patch 960D to JMP $AC06
+ResetCache:
+		sta $0298				// patched code, set error flag
+		sta RE_cached_track		// set invalid values
+		sta RE_max_sector
+		rts
+
 ReadSector:
 // patch $F4D1 to jump in here, required sector number is on (HDRPNT)+1, required track in (HDRPNT), data goes into buffer at (BUFPNT)
 		ldy #0
-		lda (HDRPNT),y			// cached track the same as required track?
+		lda (HDRPNT),y			// is cached track the same as required track?
 		cmp RE_cached_track
 		beq ReadCache
-		jmp ReadTrack			// no - read the track
+!:		jmp ReadTrack			// no - read the track
 
 ReadCache:
 		iny						// yes, track is cached, just put GCR data back and jump into ROM
