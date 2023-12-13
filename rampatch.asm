@@ -74,6 +74,43 @@
 
 /////////////////////////////////////		
 
+#define ROM1571
+
+#if ROM1571
+.print "Assembling stock 1571 ROM 310654-05"
+.segmentdef Combined  [outBin="1571-rom.310654-05-patched.bin", segments="Base,Patch1,Patch2,Patch3,Patch4,MainPatch", allowOverlap]
+.segment Base [start = $8000]
+	.var data = LoadBinary("rom/1571-rom.310654-05.bin")
+	.fill data.getSize(), data.get(i)
+#endif
+
+/////////////////////////////////////		
+
+.segment Patch1 []
+
+		.pc = $F4D1 "Patch 1541 sector read"
+		jmp $B700 // jmp ReadSector
+
+.segment Patch2 []
+
+		.pc = $960D "Patch 1571 sector read"
+		jmp $B703 // jmp ReadSector71
+
+.segment Patch3 []
+
+		.pc = $C649 "Patch disk change"
+		jsr $B706 // jsr ResetCache
+
+.segment Patch4 []
+
+		.pc = $EAE5 "Patch ROM checksum"
+		nop
+		nop
+
+/////////////////////////////////////		
+
+.segment MainPatch []
+
 		// $B700-$BEFF area available both on stock and jiffydos
 		.pc = $B700 "Patch"
 
