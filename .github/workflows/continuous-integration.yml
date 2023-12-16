@@ -25,7 +25,9 @@ jobs:
 
       # Download KickAss
       - name: Download KickAss
-        run: curl http://theweb.dk/KickAssembler/KickAssembler.zip -H 'User-Agent: Hi There' --output KickAssembler.zip && unzip KickAssembler.zip
+        run: |
+          curl http://theweb.dk/KickAssembler/KickAssembler.zip -H 'User-Agent: Hi There' --output KickAssembler.zip
+          unzip KickAssembler.zip
 
       # Build two stock ROMs
       - name: Patch standalone 1571 ROM
