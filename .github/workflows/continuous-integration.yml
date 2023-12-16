@@ -1,0 +1,48 @@
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
+      # Download KickAss
+      - name: Download KickAss
+        run: wget http://www.theweb.dk/KickAssembler/KickAssembler.zip && unzip KickAssembler.zip
+
+      # Build two stock ROMs
+      - name: Patch standalone 1571 ROM
+        run: java -jar KickAss.jar rampatch.asm -showmem -define ROM1571
+
+      - name: Patch internal 1571 ROM
+        run: java -jar KickAss.jar rampatch.asm -showmem -define ROM1571CR
+
+      # Upload artifacts
+      - name: Archive patched 1571 ROM
+        uses: actions/upload-artifact@v3
+        with:
+          name: 1571-rom.310654-05-patched.bin
+          path: 1571-rom.310654-05-patched.bin
+
+      - name: Archive patched 1571CR ROM
+        uses: actions/upload-artifact@v3
+        with:
+          name: 1571cr-rom.318047-01-patched.bin
+          path: 1571cr-rom.318047-01-patched.bin
