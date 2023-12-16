@@ -29,7 +29,7 @@ You need [KickAss](http://www.theweb.dk/KickAssembler/Main.html#frontpage) to as
 
 There is only one file here: [rampatch.asm](rampatch.asm). It reads a ROM as an input, applies patches and saves the result.
 
-In the [rom/](rom) folder I have provided stock ROM images for standalone 1571 drive (310654-05) and for C128D's internal 1571CR drive (318047-01).
+In the [rom/](rom) folder I have provided two inputs: stock ROM images for standalone 1571 drive (310654-05) and for C128D's internal 1571CR drive (318047-01).
 
 The same code can be used to patch JiffyDOS, but you need to provide ROM images yourself.
 
