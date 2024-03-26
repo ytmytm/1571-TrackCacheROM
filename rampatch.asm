@@ -167,7 +167,7 @@
 
 .segment Patch7 []
 		.pc = $D005 "Patch 'I' command"
-		jsr ResetOnlyCache
+		jsr InitializeAndResetCache
 
 .segment Patch8[]
 		.pc = $9027 "Patch 'U0>M{01}' execution"
