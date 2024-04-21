@@ -133,3 +133,6 @@ After disabling parts that are 1571-specific, the same code will work just as we
 
 The problem is that on a stock 1541, there is not enough unused space in the ROM area to put these patches.
 So something would have to be disabled, for example REL file support.
+
+But [there is a 1541-RAMBOardII project](https://github.com/ytmytm/1541-RAMBOardII) that adds both 8K of RAM as well as 8K of ROM. And it supports DolphinDOS 2.
+
